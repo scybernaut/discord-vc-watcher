@@ -44,9 +44,8 @@ export const getVoiceDataById = async (id: string): Promise<VoiceData> => {
 };
 
 export const getMutedTime = (id: string) => {
-  return ongoing[id].muteStart
-    ? Math.round((Date.now() - <number>ongoing[id].muteStart) / 1000)
-    : 0;
+  const muteStart = ongoing[id].muteStart;
+  return muteStart ? Math.floor((Date.now() - muteStart) / 1000) : 0;
 };
 
 export const startCall = (member: GuildMember): void => {
@@ -62,10 +61,9 @@ export const endCall = async (member: GuildMember): Promise<void> => {
 
   const data = await getVoiceDataById(id);
 
-  if (!ongoing[id].callStart) return;
-  data.voice_time += Math.round(
-    (Date.now() - <number>ongoing[id].callStart) / 1000
-  );
+  const callStart = ongoing[id].callStart;
+  if (!callStart) return;
+  data.voice_time += Math.floor((Date.now() - callStart) / 1000);
 
   data.muted_time += getMutedTime(id);
 
@@ -148,6 +146,17 @@ export const onVoiceUpdate = async (
   }
 };
 
-export const getStats = (): Promise<Array<VoiceData>> => {
-  return DB.all("SELECT * FROM voicetime");
+export const getStats = async (): Promise<Array<VoiceData>> => {
+  const fetchedData: Array<VoiceData> = await DB.all("SELECT * FROM voicetime");
+  const now = Date.now();
+
+  return fetchedData.map((each) => {
+    const callStart = ongoing[each.user]?.callStart;
+    if (callStart) each.voice_time += Math.floor((now - callStart) / 1000);
+
+    const muteStart = ongoing[each.user]?.muteStart;
+    if (muteStart) each.muted_time += Math.floor((now - muteStart) / 1000);
+
+    return each;
+  });
 };
