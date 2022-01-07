@@ -1,4 +1,5 @@
 import fs from "fs";
+import path from "path";
 import YAML from "yaml";
 
 interface Config {
@@ -14,5 +15,5 @@ interface Config {
   guildId: string;
 }
 
-const file = fs.readFileSync("../config.yml", "utf8");
+const file = fs.readFileSync(path.join(__dirname, "../config.yml"), "utf8");
 export default YAML.parse(file) as Config;
