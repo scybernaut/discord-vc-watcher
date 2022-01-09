@@ -39,14 +39,37 @@ client.on("voiceStateUpdate", Watcher.onVoiceUpdate);
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isCommand() && interaction.inGuild()) {
     if (interaction.guildId !== CONFIG.guildId) {
-      console.log("Guild ID not whitelisted.");
+      console.log(`Guild ID ${interaction.guildId} not whitelisted.`);
       return;
     }
 
     if (interaction.commandName === "stats") {
-      const stats = await Watcher.getStats();
+      const user = interaction.options.getUser("user", false);
 
-      stats.sort((left, right) => right.CallTime - left.CallTime);
+      if (user?.bot) {
+        interaction.reply({
+          embeds: [
+            new MessageEmbed({
+              description: "Bots' voice time is not tracked",
+              color: "RED",
+            }),
+          ],
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const userID = user?.id;
+
+      const stats = await Watcher.getStats(
+        userID,
+        interaction.createdTimestamp
+      );
+
+      stats.sort(
+        (left, right) =>
+          right.CallTime - left.CallTime || left.MutedTime - right.MutedTime
+      );
 
       const durationString = (duration: duration.Duration) =>
         [
@@ -59,21 +82,55 @@ client.on("interactionCreate", async (interaction) => {
           .join(" ")
           .trimStart();
 
-      const embed = new MessageEmbed().setTitle("Voice time").setDescription(
-        stats.reduce((acc, cur, i) => {
-          const callDuration = dayjs.duration(cur.CallTime, "seconds");
-          const mutedDuration = dayjs.duration(cur.MutedTime, "seconds");
+      const embed = new MessageEmbed()
+        .setTitle("Voice time")
+        .setColor("AQUA")
+        .setTimestamp(interaction.createdTimestamp);
 
-          acc += stripIndents`
-            **#${i + 1} — ${Formatters.memberNicknameMention(cur.UserID)}**
-            Call time: \t${durationString(callDuration)}
-            Muted time: \t${durationString(mutedDuration)}`;
+      if (userID) {
+        const callDuration = dayjs.duration(stats[0].CallTime, "seconds");
+        const mutedDuration = dayjs.duration(stats[0].MutedTime, "seconds");
 
-          acc += "\n\n";
+        embed
+          .setDescription(
+            `${Formatters.memberNicknameMention(userID)}'s voice time`
+          )
+          .addField("Call time", durationString(callDuration), true)
+          .addField("Muted time", durationString(mutedDuration), true);
+      } else {
+        const numberToEmojis = (n: number): string => {
+          // prettier-ignore
+          const NAME_LIST = [
+            "zero", "one", "two", "three", "four",
+            "five", "six", "seven", "eight", "nine",
+          ];
 
-          return acc;
-        }, "")
-      );
+          let result = "";
+
+          for (const c of n.toString()) {
+            result += `:${NAME_LIST[parseInt(c)]}:`;
+          }
+
+          return result;
+        };
+        embed.setDescription(
+          stats.reduce((acc, cur, i) => {
+            const callDuration = dayjs.duration(cur.CallTime, "seconds");
+            const mutedDuration = dayjs.duration(cur.MutedTime, "seconds");
+
+            // prettier-ignore
+            acc += stripIndents`
+              **${numberToEmojis(i + 1)} — ${Formatters.memberNicknameMention(cur.UserID)}**
+              Call time: \`${durationString(callDuration)}\`
+              Muted time: \`${durationString(mutedDuration)}\``;
+
+            acc += "\n\n";
+
+            return acc;
+          }, "")
+        );
+      }
+
       interaction.reply({ embeds: [embed] });
     }
   }

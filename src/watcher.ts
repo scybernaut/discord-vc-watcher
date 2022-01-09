@@ -144,23 +144,33 @@ export const onVoiceUpdate = async (
   }
 };
 
-export const getStats = async (): Promise<Array<VoiceData>> => {
-  const fetchedData: Array<VoiceData> = await repo.find();
-  const now = Date.now();
+export const getStats = async (
+  id: string | undefined,
+  timeRef: number
+): Promise<Array<VoiceData>> => {
+  let voiceData: Array<VoiceData>;
 
-  return fetchedData
-    .map((each) => {
-      // Add ongoing time
-      const callStart = ongoing[each.UserID]?.callStart;
-      if (callStart) each.CallTime += Math.floor((now - callStart) / 1000);
+  if (id) {
+    let fetchedData = await repo.findOne(id);
+    fetchedData ||= {
+      UserID: id,
+      CallTime: 0,
+      MutedTime: 0,
+    };
 
-      const muteStart = ongoing[each.UserID]?.muteStart;
-      if (muteStart) each.MutedTime += Math.floor((now - muteStart) / 1000);
+    voiceData = [fetchedData];
+  } else {
+    voiceData = await repo.find();
+  }
 
-      return each;
-    })
-    .sort(
-      (left, right) =>
-        right.CallTime - left.CallTime || left.MutedTime - right.MutedTime
-    );
+  return voiceData.map((each) => {
+    // Add ongoing time
+    const callStart = ongoing[each.UserID]?.callStart;
+    if (callStart) each.CallTime += Math.floor((timeRef - callStart) / 1000);
+
+    const muteStart = ongoing[each.UserID]?.muteStart;
+    if (muteStart) each.MutedTime += Math.floor((timeRef - muteStart) / 1000);
+
+    return each;
+  });
 };
