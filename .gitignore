@@ -1,4 +1,4 @@
 node_modules/
 out/
 config.yml
-data
+data.sqlite

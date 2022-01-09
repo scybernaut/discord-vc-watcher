@@ -32,11 +32,7 @@ const timeFormatters = {
   }),
 };
 
-client.once("ready", () => {
-  console.log(`logged in as ${client.user?.tag}`);
-
-  Watcher.init();
-});
+client.once("ready", () => console.log(`logged in as ${client.user?.tag}`));
 
 client.on("voiceStateUpdate", Watcher.onVoiceUpdate);
 
@@ -50,7 +46,7 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.commandName === "stats") {
       const stats = await Watcher.getStats();
 
-      stats.sort((left, right) => right.voice_time - left.voice_time);
+      stats.sort((left, right) => right.CallTime - left.CallTime);
 
       const durationString = (duration: duration.Duration) =>
         [
@@ -65,11 +61,11 @@ client.on("interactionCreate", async (interaction) => {
 
       const embed = new MessageEmbed().setTitle("Voice time").setDescription(
         stats.reduce((acc, cur, i) => {
-          const callDuration = dayjs.duration(cur.voice_time, "seconds");
-          const mutedDuration = dayjs.duration(cur.muted_time, "seconds");
+          const callDuration = dayjs.duration(cur.CallTime, "seconds");
+          const mutedDuration = dayjs.duration(cur.MutedTime, "seconds");
 
           acc += stripIndents`
-            **#${i + 1} — ${Formatters.memberNicknameMention(cur.user)}**
+            **#${i + 1} — ${Formatters.memberNicknameMention(cur.UserID)}**
             Call time: \t${durationString(callDuration)}
             Muted time: \t${durationString(mutedDuration)}`;
 

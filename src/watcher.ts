@@ -1,94 +1,78 @@
-import sqlite3 from "sqlite3"; // sqlite driver
-import { Database, open } from "sqlite"; // sqlite interface
-import CONFIG from "./configLoader";
-import {
-  GuildMember,
-  StageChannel,
-  VoiceChannel,
-  VoiceState,
-} from "discord.js";
+import { createConnection, Repository } from "typeorm";
 
-interface VoiceData {
-  user: string;
-  voice_time: number;
-  muted_time: number;
-}
+import CONFIG from "./configLoader";
+import { GuildMember, VoiceChannel, VoiceState } from "discord.js";
+
+import { VoiceData } from "./VoiceData";
 
 const ongoing: {
   [id: string]: {
-    // inCall: boolean;
     callStart?: number;
     muteStart?: number;
   };
 } = {};
 
-let DB: Database<sqlite3.Database, sqlite3.Statement>;
+let repo: Repository<VoiceData>;
 
-export const init = async () => {
-  await open({
-    filename: CONFIG.database.file.name,
-    driver: sqlite3.Database,
-  }).then((db) => (DB = db));
-};
+createConnection({
+  type: "sqlite",
+  database: CONFIG.database.file.name,
+  entities: [VoiceData],
+}).then((connection) => {
+  repo = connection.getRepository(VoiceData);
+  console.log("connected to database");
+});
 
-export const getVoiceDataById = async (id: string): Promise<VoiceData> => {
-  const queryData = (_id: string) =>
-    DB.get("SELECT * FROM voicetime WHERE user = ?", _id) as Promise<VoiceData>;
-
-  const result = await queryData(id);
-
-  if (result !== undefined) return result;
-
-  await DB.run("INSERT INTO voicetime (user) VALUES (?)", id);
-  return await queryData(id);
-};
-
-export const getMutedTime = (id: string) => {
-  const muteStart = ongoing[id].muteStart;
-  return muteStart ? Math.floor((Date.now() - muteStart) / 1000) : 0;
-};
-
-export const startCall = (member: GuildMember): void => {
-  if (member.user.bot) return;
-
-  ongoing[member.id] ||= {};
-  ongoing[member.id].callStart ||= Date.now();
-  if (member.voice.selfMute) ongoing[member.id].muteStart ||= Date.now();
-};
-
-export const endCall = async (member: GuildMember): Promise<void> => {
-  const id = member.id;
-
-  const data = await getVoiceDataById(id);
-
+const calcCallTime = (id: string, refTime: number) => {
   const callStart = ongoing[id].callStart;
-  if (!callStart) return;
-  data.voice_time += Math.floor((Date.now() - callStart) / 1000);
-
-  data.muted_time += getMutedTime(id);
-
-  delete ongoing[id];
-
-  await DB.run(
-    "UPDATE voicetime SET voice_time = ?, muted_time = ? WHERE user = ?",
-    data.voice_time,
-    data.muted_time,
-    id
-  );
+  return callStart ? Math.floor((refTime - callStart) / 1000) : 0;
 };
 
-export const endMute = async (member: GuildMember): Promise<void> => {
-  const data = await getVoiceDataById(member.id);
+const calcMutedTime = (id: string, refTime: number) => {
+  const muteStart = ongoing[id].muteStart;
+  return muteStart ? Math.floor((refTime - muteStart) / 1000) : 0;
+};
 
-  data.muted_time += getMutedTime(member.id);
+export const startCall = (member: GuildMember, refTime: number): void => {
+  ongoing[member.id] ||= {};
+  ongoing[member.id].callStart ||= refTime;
+  if (member.voice.selfMute) ongoing[member.id].muteStart ||= refTime;
+};
 
-  delete ongoing[member.id].muteStart;
+type durationEndHandler = (
+  member: GuildMember,
+  refTime: number
+) => Promise<void>;
 
-  await DB.run(
-    "UPDATE voicetime SET muted_time = ? WHERE user = ?",
-    data.muted_time,
-    member.id
+const createIfNotExist = (id: string): Promise<boolean> =>
+  repo
+    .insert({ UserID: id })
+    .then(() => true)
+    .catch((err) => {
+      if (err.code === "SQLITE_CONSTRAINT") return false;
+      throw err;
+    });
+
+export const endCall: durationEndHandler = async (member, refTime) => {
+  await createIfNotExist(member.id);
+  await repo.increment(
+    { UserID: member.id },
+    "CallTime",
+    calcCallTime(member.id, refTime)
   );
+
+  delete ongoing[member.id];
+};
+
+export const endMute: durationEndHandler = async (member, refTime) => {
+  await createIfNotExist(member.id);
+  await repo.increment(
+    { UserID: member.id },
+    "MutedTime",
+    calcMutedTime(member.id, refTime)
+  );
+
+  delete ongoing[member.id]?.muteStart;
 };
 
 export const onVoiceUpdate = async (
@@ -96,8 +80,12 @@ export const onVoiceUpdate = async (
   newState: VoiceState
 ): Promise<void> => {
   const guild = oldState.guild;
+  if (guild.id != CONFIG.guildId) return;
 
-  ongoing[oldState.id] ||= {};
+  if (oldState.member?.user.bot) return;
+  if (newState.member?.user.bot) return;
+
+  ongoing[newState.id] ||= {};
 
   const joinedHumansCount = (voiceChannel: VoiceChannel) =>
     voiceChannel.members.reduce((acc, val) => acc + +!val.user.bot, 0);
@@ -110,23 +98,33 @@ export const onVoiceUpdate = async (
   if (!(oldChannel === null || oldChannel instanceof VoiceChannel)) return;
   if (!(newChannel === null || newChannel instanceof VoiceChannel)) return;
 
+  const recvTime = Date.now(); // for fair time
+
   if (newChannel) {
     // channel changed
     if (oldState.channelId != newState.channelId) {
-      newChannel.members.forEach(
-        joinedHumansCount(newChannel) > 1 ? startCall : endCall
-      );
+      const checkChannelState = (channel: VoiceChannel) => {
+        const isCall = joinedHumansCount(channel) > 1;
+        channel.members.forEach((member) => {
+          if (member.user.bot) return;
+
+          if (isCall) startCall(member, recvTime);
+          else endCall(member, recvTime);
+        });
+      };
+
+      if (oldChannel) checkChannelState(oldChannel);
+      checkChannelState(newChannel);
     }
 
     if (!newState.member) return;
-
     if (ongoing[newState.member.id].callStart) {
       // mute state changed
       switch (Number(oldState.selfMute) - Number(newState.selfMute)) {
         case 1: // unmute
-          endMute(newState.member);
+          endMute(newState.member, recvTime);
         case -1: // mute
-          ongoing[newState.member.id].muteStart ||= Date.now();
+          ongoing[newState.member.id].muteStart ||= recvTime;
       }
     }
   } else {
@@ -134,29 +132,35 @@ export const onVoiceUpdate = async (
     if (oldChannel) {
       if (!oldState.member) return;
 
-      endCall(oldState.member);
-
-      console.log(oldState.member.id);
+      endCall(oldState.member, recvTime);
 
       if (joinedHumansCount(oldChannel) <= 1)
-        oldChannel.members.forEach(endCall);
+        oldChannel.members.forEach(
+          (member) => !member.user.bot && endCall(member, recvTime)
+        );
     } else {
-      // old channel not cached
+      // old state not cached, do nothing
     }
   }
 };
 
 export const getStats = async (): Promise<Array<VoiceData>> => {
-  const fetchedData: Array<VoiceData> = await DB.all("SELECT * FROM voicetime");
+  const fetchedData: Array<VoiceData> = await repo.find();
   const now = Date.now();
 
-  return fetchedData.map((each) => {
-    const callStart = ongoing[each.user]?.callStart;
-    if (callStart) each.voice_time += Math.floor((now - callStart) / 1000);
+  return fetchedData
+    .map((each) => {
+      // Add ongoing time
+      const callStart = ongoing[each.UserID]?.callStart;
+      if (callStart) each.CallTime += Math.floor((now - callStart) / 1000);
 
-    const muteStart = ongoing[each.user]?.muteStart;
-    if (muteStart) each.muted_time += Math.floor((now - muteStart) / 1000);
+      const muteStart = ongoing[each.UserID]?.muteStart;
+      if (muteStart) each.MutedTime += Math.floor((now - muteStart) / 1000);
 
-    return each;
-  });
+      return each;
+    })
+    .sort(
+      (left, right) =>
+        right.CallTime - left.CallTime || left.MutedTime - right.MutedTime
+    );
 };
