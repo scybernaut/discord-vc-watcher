@@ -1,4 +1,4 @@
-import CONFIG from "./configLoader";
+import CONFIG from "./ConfigLoader";
 import chalk from "chalk";
 
 const log = (levelStr: string, message: string) =>
@@ -11,7 +11,7 @@ const levels = {
   debug: 3,
 };
 
-export const logger = {
+export default {
   error: (message: string) => {
     if (levels[CONFIG.logLevel] >= levels.error)
       log(chalk.red("error"), message);

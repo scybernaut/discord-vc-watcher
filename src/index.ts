@@ -1,8 +1,8 @@
 import { Client, MessageEmbed, Formatters, Intents } from "discord.js";
-import CONFIG from "./configLoader";
-import * as Watcher from "./watcher";
+import CONFIG from "./ConfigLoader";
+import * as Watcher from "./Watcher";
 
-import { logger } from "./logger";
+import logger from "./Logger";
 
 import { stripIndents, oneLine } from "common-tags";
 

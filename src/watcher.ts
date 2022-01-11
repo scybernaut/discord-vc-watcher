@@ -1,9 +1,11 @@
 import { createConnection, Repository } from "typeorm";
 
-import CONFIG from "./configLoader";
+import CONFIG from "./ConfigLoader";
 import { GuildMember, VoiceChannel, VoiceState } from "discord.js";
-
 import { VoiceData } from "./VoiceData";
+
+import logger from "./Logger";
+import { oneLine } from "common-tags";
 
 const ongoing: {
   [id: string]: {
@@ -33,10 +35,23 @@ const calcMutedTime = (id: string, refTime: number) => {
   return muteStart ? Math.floor((refTime - muteStart) / 1000) : 0;
 };
 
-export const startCall = (member: GuildMember, refTime: number): void => {
+const startCall = (member: GuildMember, refTime: number): void => {
   ongoing[member.id] ||= {};
+
+  if (!ongoing[member.id].callStart)
+    logger.info(`call started: user ${member.id}`);
+
   ongoing[member.id].callStart ||= refTime;
   if (member.voice.selfMute) ongoing[member.id].muteStart ||= refTime;
+};
+
+const startMute = (member: GuildMember, refTime: number): void => {
+  ongoing[member.id] ||= {};
+
+  if (!ongoing[member.id].muteStart)
+    logger.info(`mute started: user ${member.id}`);
+
+  ongoing[member.id].muteStart ||= refTime;
 };
 
 type durationEndHandler = (
@@ -53,24 +68,22 @@ const createIfNotExist = (id: string): Promise<boolean> =>
       throw err;
     });
 
-export const endCall: durationEndHandler = async (member, refTime) => {
+const endCall: durationEndHandler = async (member, refTime) => {
+  const callTime = calcCallTime(member.id, refTime);
+  logger.info(`call ended: ${callTime} secs, user ${member.id}`);
+
   await createIfNotExist(member.id);
-  await repo.increment(
-    { UserID: member.id },
-    "CallTime",
-    calcCallTime(member.id, refTime)
-  );
+  await repo.increment({ UserID: member.id }, "CallTime", callTime);
 
   delete ongoing[member.id];
 };
 
-export const endMute: durationEndHandler = async (member, refTime) => {
+const endMute: durationEndHandler = async (member, refTime) => {
+  const mutedTime = calcMutedTime(member.id, refTime);
+  logger.info(`mute ended: ${mutedTime} secs, user ${member.id}`);
+
   await createIfNotExist(member.id);
-  await repo.increment(
-    { UserID: member.id },
-    "MutedTime",
-    calcMutedTime(member.id, refTime)
-  );
+  await repo.increment({ UserID: member.id }, "MutedTime", mutedTime);
 
   delete ongoing[member.id]?.muteStart;
 };
@@ -85,6 +98,8 @@ export const onVoiceUpdate = async (
   if (oldState.member?.user.bot) return;
   if (newState.member?.user.bot) return;
 
+  logger.info(`voiceStateUpdate received: user ${newState.id}`);
+
   ongoing[newState.id] ||= {};
 
   const joinedHumansCount = (voiceChannel: VoiceChannel) =>
@@ -94,6 +109,7 @@ export const onVoiceUpdate = async (
     oldState.channelId ? guild.channels.fetch(oldState.channelId) : null,
     newState.channelId ? guild.channels.fetch(newState.channelId) : null,
   ]);
+  logger.debug("fetched both old and new states' channel");
 
   if (!(oldChannel === null || oldChannel instanceof VoiceChannel)) return;
   if (!(newChannel === null || newChannel instanceof VoiceChannel)) return;
@@ -103,7 +119,12 @@ export const onVoiceUpdate = async (
   if (newChannel) {
     // channel changed
     if (oldState.channelId != newState.channelId) {
-      const checkChannelState = (channel: VoiceChannel) => {
+      logger.info(oneLine`
+        stateUpdate: channel change
+        ${oldState.channelId} -> ${newState.channelId}
+      `);
+
+      const updateChannelState = (channel: VoiceChannel) => {
         const isCall = joinedHumansCount(channel) > 1;
         channel.members.forEach((member) => {
           if (member.user.bot) return;
@@ -113,8 +134,8 @@ export const onVoiceUpdate = async (
         });
       };
 
-      if (oldChannel) checkChannelState(oldChannel);
-      checkChannelState(newChannel);
+      if (oldChannel) updateChannelState(oldChannel);
+      updateChannelState(newChannel);
     }
 
     if (!newState.member) return;
@@ -124,11 +145,12 @@ export const onVoiceUpdate = async (
         case 1: // unmute
           endMute(newState.member, recvTime);
         case -1: // mute
-          ongoing[newState.member.id].muteStart ||= recvTime;
+          startMute(newState.member, recvTime);
       }
     }
   } else {
     // user disconnects
+    logger.info("stateUpdate: disconnect");
     if (oldChannel) {
       if (!oldState.member) return;
 
@@ -139,7 +161,7 @@ export const onVoiceUpdate = async (
           (member) => !member.user.bot && endCall(member, recvTime)
         );
     } else {
-      // old state not cached, do nothing
+      logger.warn("old channel not cached, doing nothing");
     }
   }
 };
