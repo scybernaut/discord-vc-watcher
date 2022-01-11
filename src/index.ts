@@ -4,7 +4,7 @@ import * as Watcher from "./watcher";
 
 import { logger } from "./logger";
 
-import { stripIndents } from "common-tags";
+import { stripIndents, oneLine } from "common-tags";
 
 import dayjs from "dayjs";
 import duration from "dayjs/plugin/duration.js";
@@ -39,10 +39,23 @@ client.once("ready", () => console.log(`logged in as ${client.user?.tag}`));
 client.on("voiceStateUpdate", Watcher.onVoiceUpdate);
 
 client.on("interactionCreate", async (interaction) => {
-  logger.info("interaction received");
+  logger.info(oneLine`
+    interaction received;
+    discord-provided timestamp: ${interaction.createdTimestamp}
+  `);
+
   if (interaction.isCommand() && interaction.inGuild()) {
     if (interaction.guildId !== CONFIG.guildId) {
-      logger.info(`Guild ${interaction.guildId} is not whitelisted.`);
+      logger.info(`replying: guild ${interaction.guildId} is not whitelisted.`);
+      interaction.reply({
+        embeds: [
+          new MessageEmbed({
+            description: "This guild is not whitelisted",
+            color: "RED",
+          }),
+        ],
+        ephemeral: true,
+      });
       return;
     }
 
@@ -63,6 +76,10 @@ client.on("interactionCreate", async (interaction) => {
         });
         return;
       }
+
+      // had to defer because sometimes DiscordAPIError: Unknown interaction
+      // would be thrown, probably due to discord.js's ratelimit :(
+      const deferAction = interaction.deferReply();
 
       const userID = user?.id;
 
@@ -129,9 +146,9 @@ client.on("interactionCreate", async (interaction) => {
             const callDuration = dayjs.duration(cur.CallTime, "seconds");
             const mutedDuration = dayjs.duration(cur.MutedTime, "seconds");
 
-            // prettier-ignore
+            const userMention = Formatters.memberNicknameMention(cur.UserID);
             acc += stripIndents`
-              **${numberToEmojis(i + 1)} — ${Formatters.memberNicknameMention(cur.UserID)}**
+              **${numberToEmojis(i + 1)} — ${userMention}**
               Call time: \`${durationString(callDuration)}\`
               Muted time: \`${durationString(mutedDuration)}\``;
 
@@ -142,8 +159,11 @@ client.on("interactionCreate", async (interaction) => {
         );
       }
 
+      await deferAction;
       logger.info(`replying with embed`);
-      interaction.reply({ embeds: [embed] });
+      interaction
+        .editReply({ embeds: [embed] })
+        .catch((err) => logger.error("error in sending embed: " + err));
     }
   }
 });
