@@ -13,6 +13,7 @@ interface Config {
     };
   };
   guildId: string;
+  logLevel: "error" | "warn" | "info" | "debug";
 }
 
 const file = fs.readFileSync(path.join(__dirname, "../config.yml"), "utf8");

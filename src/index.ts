@@ -2,6 +2,8 @@ import { Client, MessageEmbed, Formatters, Intents } from "discord.js";
 import CONFIG from "./configLoader";
 import * as Watcher from "./watcher";
 
+import { logger } from "./logger";
+
 import { stripIndents } from "common-tags";
 
 import dayjs from "dayjs";
@@ -37,16 +39,19 @@ client.once("ready", () => console.log(`logged in as ${client.user?.tag}`));
 client.on("voiceStateUpdate", Watcher.onVoiceUpdate);
 
 client.on("interactionCreate", async (interaction) => {
+  logger.info("interaction received");
   if (interaction.isCommand() && interaction.inGuild()) {
     if (interaction.guildId !== CONFIG.guildId) {
-      console.log(`Guild ID ${interaction.guildId} not whitelisted.`);
+      logger.info(`Guild ${interaction.guildId} is not whitelisted.`);
       return;
     }
 
     if (interaction.commandName === "stats") {
+      logger.debug("command name is stats");
       const user = interaction.options.getUser("user", false);
 
       if (user?.bot) {
+        logger.info("replying: user param is a bot");
         interaction.reply({
           embeds: [
             new MessageEmbed({
@@ -65,6 +70,7 @@ client.on("interactionCreate", async (interaction) => {
         userID,
         interaction.createdTimestamp
       );
+      logger.debug(`stats fetched with size ${stats.length}`);
 
       stats.sort(
         (left, right) =>
@@ -88,6 +94,8 @@ client.on("interactionCreate", async (interaction) => {
         .setTimestamp(interaction.createdTimestamp);
 
       if (userID) {
+        logger.info("user specified: filling up embed");
+
         const callDuration = dayjs.duration(stats[0].CallTime, "seconds");
         const mutedDuration = dayjs.duration(stats[0].MutedTime, "seconds");
 
@@ -98,10 +106,12 @@ client.on("interactionCreate", async (interaction) => {
           .addField("Call time", durationString(callDuration), true)
           .addField("Muted time", durationString(mutedDuration), true);
       } else {
+        logger.info("user not specified: filling up embed");
+
         const numberToEmojis = (n: number): string => {
           // prettier-ignore
           const NAME_LIST = [
-            "zero", "one", "two", "three", "four",
+            "zero", "one",   "two", "three", "four",
             "five", "six", "seven", "eight", "nine",
           ];
 
@@ -113,6 +123,7 @@ client.on("interactionCreate", async (interaction) => {
 
           return result;
         };
+
         embed.setDescription(
           stats.reduce((acc, cur, i) => {
             const callDuration = dayjs.duration(cur.CallTime, "seconds");
@@ -131,6 +142,7 @@ client.on("interactionCreate", async (interaction) => {
         );
       }
 
+      logger.info(`replying with embed`);
       interaction.reply({ embeds: [embed] });
     }
   }
