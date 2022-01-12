@@ -139,7 +139,7 @@ export const onVoiceUpdate = async (
     }
 
     if (!newState.member) return;
-    if (ongoing[newState.member.id].callStart) {
+    if (ongoing[newState.id].callStart) {
       // mute state changed
       switch (Number(oldState.selfMute) - Number(newState.selfMute)) {
         case 1: // unmute
