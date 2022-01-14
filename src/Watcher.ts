@@ -37,24 +37,22 @@ const calcMutedTime = (id: string, refTime: number) => {
 
 const startCall = (member: GuildMember, refTime: number): void => {
   ongoing[member.id] ||= {};
+  if (ongoing[member.id].callStart) return;
 
-  if (!ongoing[member.id].callStart)
-    logger.info(`call started: user ${member.id}`);
+  logger.info(`call started: user ${member.id}`);
 
-  ongoing[member.id].callStart ||= refTime;
-  if (member.voice.selfMute) {
-    logger.info(`mute started since call start: user ${member.id}`);
-    ongoing[member.id].muteStart ||= refTime;
-  }
+  ongoing[member.id].callStart = refTime;
+
+  if (member.voice.selfMute) startMute(member, refTime);
 };
 
 const startMute = (member: GuildMember, refTime: number): void => {
   ongoing[member.id] ||= {};
 
-  if (!ongoing[member.id].muteStart)
-    logger.info(`mute started: user ${member.id}`);
+  if (ongoing[member.id].muteStart) return;
 
-  ongoing[member.id].muteStart ||= refTime;
+  logger.info(`mute started: user ${member.id}`);
+  ongoing[member.id].muteStart = refTime;
 };
 
 type durationEndHandler = (
@@ -76,16 +74,22 @@ const createIfNotExist = (id: string): Promise<boolean> =>
 
 const endCall: durationEndHandler = async (member, refTime) => {
   const callTime = calcCallTime(member.id, refTime);
+  if (!callTime) return;
+
   logger.info(`call ended: ${callTime} secs, user ${member.id}`);
 
   await createIfNotExist(member.id);
   await repo.increment({ UserID: member.id }, "CallTime", callTime);
+
+  await endMute(member, refTime);
 
   delete ongoing[member.id];
 };
 
 const endMute: durationEndHandler = async (member, refTime) => {
   const mutedTime = calcMutedTime(member.id, refTime);
+  if (!mutedTime) return;
+
   logger.info(`mute ended: ${mutedTime} secs, user ${member.id}`);
 
   await createIfNotExist(member.id);
