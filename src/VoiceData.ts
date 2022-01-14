@@ -5,9 +5,9 @@ export class VoiceData {
   @PrimaryColumn()
   UserID!: string;
 
-  @Column()
-  CallTime: number = 0;
+  @Column({ default: 0 })
+  CallTime!: number;
 
-  @Column()
-  MutedTime: number = 0;
+  @Column({ default: 0 })
+  MutedTime!: number;
 }

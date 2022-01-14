@@ -42,7 +42,10 @@ const startCall = (member: GuildMember, refTime: number): void => {
     logger.info(`call started: user ${member.id}`);
 
   ongoing[member.id].callStart ||= refTime;
-  if (member.voice.selfMute) ongoing[member.id].muteStart ||= refTime;
+  if (member.voice.selfMute) {
+    logger.info(`mute started since call start: user ${member.id}`);
+    ongoing[member.id].muteStart ||= refTime;
+  }
 };
 
 const startMute = (member: GuildMember, refTime: number): void => {
@@ -64,7 +67,10 @@ const createIfNotExist = (id: string): Promise<boolean> =>
     .insert({ UserID: id })
     .then(() => true)
     .catch((err) => {
-      if (err.code === "SQLITE_CONSTRAINT") return false;
+      if (err.code === "SQLITE_CONSTRAINT") {
+        logger.debug("insert failed with code SQLITE_CONSTRAINT");
+        return false;
+      }
       throw err;
     });
 
